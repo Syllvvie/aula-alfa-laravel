@@ -44,6 +44,22 @@ class UserController extends Controller
     User::create($input);
     return redirect()->route('admin.users.index');
    }
-   
 
+   public function forgotPassword()
+    {
+        return view('user.forgot-password');
+    }
+
+    public function updatePassword(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|string|email|exists:users,email',
+        ], [
+            'email.exists' => 'Este e-mail não está registado no sistema.',
+        ]);
+
+        $user = User::where('email', $request->email)->first();
+
+        return redirect()->back()->with('status', 'Enviamos um e-mail com as instruções de redefinição para o seu Gmail!');
+    }
 }
