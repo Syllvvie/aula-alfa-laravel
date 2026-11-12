@@ -1,58 +1,124 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Atividade prática: autenticação e área administrativa
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Projeto Laravel com autenticação por sessão, cadastro público e proteção das rotas administrativas por middleware.
 
-## About Laravel
-
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
-
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
-
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Como executar
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+composer install
+npm install
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Crie o arquivo `.env` (ele não é versionado) com `APP_KEY` vazio e os dados do MySQL do `database/docker-compose.yml`:
 
-## Contributing
+```env
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=mysqlDB
+DB_USERNAME=root
+DB_PASSWORD=mysqlPW
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```bash
+php artisan key:generate
+docker compose -f database/docker-compose.yml up -d
+```
 
-## Code of Conduct
+A imagem do MySQL só aceita `root` de dentro do container. Para o Laravel conectar de fora, libere o usuário uma vez:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```bash
+docker exec my-mysql mysql -uroot -pmysqlPW -e "CREATE USER 'root'@'%' IDENTIFIED BY 'mysqlPW'; GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+```
 
-## Security Vulnerabilities
+```bash
+php artisan migrate
+php artisan db:seed --class=AdminSeeder
+php artisan serve
+npm run dev
+```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Testes (usam SQLite em memória, sem tocar no MySQL): `php artisan test`
 
-## License
+## Contas de demonstração (somente ambiente local)
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+| Perfil | E-mail | Senha |
+|---|---|---|
+| Administrador | `admin@local.test` | `admin-local-123` |
+| Comum | cadastre em `/register` | a que você escolher (mínimo 8 caracteres) |
+
+O administrador é criado pelo `AdminSeeder`, que só executa quando `APP_ENV=local`. Não existe formulário público que aceite `type = admin`.
+
+## Rotas
+
+| Método e caminho | Acesso | Resultado |
+|---|---|---|
+| `GET /` | Autenticado | Página inicial |
+| `GET /login` | Público | Formulário de login |
+| `POST /login` | Público, com limite de tentativas | Valida e autentica |
+| `POST /logout` | Autenticado | Encerra a sessão |
+| `GET /register` | Público | Formulário de cadastro |
+| `POST /store` | Público | Cria conta comum |
+| `/admin/*` | Perfil `admin` | Funcionalidades do painel |
+
+## Como funciona
+
+**Login.** O `AuthController` valida os campos e tenta `Auth::attempt`. Em caso de falha, devolve uma mensagem genérica ("Credenciais inválidas."), mantendo o e-mail digitado e nunca repopulando a senha. Em caso de sucesso, regenera o ID da sessão. Administradores vão para o destino pedido antes do login (ou `/admin/users`); usuários comuns vão sempre para `/`.
+
+**Logout.** `POST /logout` invalida a sessão, regenera o token CSRF e redireciona ao login. O botão **Sair** do header é um formulário POST com `@csrf`; `GET /logout` retorna 405.
+
+**Middleware `admin` (`EnsureAdmin`).** Aplicado ao grupo `/admin`:
+- visitante: redireciona para `/login`;
+- autenticado sem `profile.type = admin`: responde **403**;
+- admin: a requisição prossegue.
+
+**Cadastro.** Valida nome, e-mail único e senha com no mínimo 8 caracteres. Cria apenas usuários comuns (sem registro de perfil). Visitante vai ao login com mensagem de sucesso; administrador autenticado volta à lista do painel.
+
+**Schema.** A tabela `profile` tinha a coluna `description`, mas o model usa `address`. Uma nova migration renomeia a coluna (sem editar a migration antiga) e a torna opcional.
+
+### Limite de tentativas de login
+
+O limite é de **5 tentativas falhas por combinação e-mail + IP**, em uma janela de 60 segundos. Ao atingir o limite, o login fica bloqueado e a tela informa quantos segundos faltam. Um login bem-sucedido zera o contador. O controle usa o `RateLimiter` do Laravel, com o cache configurado no projeto.
+
+## Demonstração
+
+### Visitante
+| `/` | `/admin/users` |
+|---|---|
+| ![](docs/capturas/01-visitante-home.png) | ![](docs/capturas/02-visitante-admin.png) |
+
+### Cadastro de conta comum
+![](docs/capturas/03-cadastro.png)
+![](docs/capturas/04-cadastro-erros.png)
+![](docs/capturas/05-cadastro-sucesso.png)
+
+### Login e logout da conta comum
+![](docs/capturas/06-login-erro.png)
+![](docs/capturas/07-login-comum.png)
+![](docs/capturas/09-logout.png)
+
+### Acesso administrativo negado (403)
+![](docs/capturas/08-comum-403.png)
+
+### Administrador no painel
+![](docs/capturas/10-login-admin.png)
+
+### Limite de tentativas
+![](docs/capturas/11-limite.png)
+
+## Perguntas para reflexão
+
+**Por que um usuário autenticado ainda pode receber 403?**
+Autenticação responde "quem é você?"; autorização responde "o que você pode fazer?". Uma conta comum está autenticada, mas o perfil dela não é `admin`, então o middleware nega o acesso.
+
+**Qual o risco de confiar apenas em um botão escondido na interface?**
+Esconder um botão só muda o que o usuário vê. Qualquer pessoa pode digitar a URL ou montar a requisição manualmente. A proteção real precisa estar no servidor (rota + middleware).
+
+**Por que logout deve ser POST protegido por CSRF?**
+Um GET pode ser disparado sem intenção do usuário (uma imagem ou link em outro site) e deslogá-lo. POST com token CSRF garante que a ação partiu do próprio formulário da aplicação.
+
+**Como o limite de tentativas ajuda e quais são suas limitações?**
+Ele dificulta ataques de força bruta e de adivinhação de senhas. Limitações: o atacante pode trocar de IP ou de e-mail; uma vítima pode ser bloqueada de propósito por tentativas alheias; e em produção o contador precisa de um cache compartilhado entre servidores. Ele reduz o risco, mas não substitui senhas fortes e outros controles (como 2FA).
+
+**Como provisionar o primeiro administrador sem expor essa capacidade ao público?**
+Por um canal que não é público: um seeder executado só em ambiente local (como o `AdminSeeder`) ou um comando Artisan rodado por quem administra o servidor. O cadastro público nunca cria perfil admin e o formulário de perfil só aceita `PF` ou `PJ`.
